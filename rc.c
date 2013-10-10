@@ -3,11 +3,13 @@
 #include <sys/queue.h>
 #include <limits.h>
 #include <unistd.h>
+#include <string.h>
 #include "distribution.h"
 
 const char *allowed_distributions_name[] = {"rsd", "uniform", "invexp"};
 const char *allowed_distributions_desc[] = {"Robust Soliton Distribution"," Uniform Distribution", "Inverse Exponential Distribution"};
 const int allowed_distributions_count = 3;
+int verbose;
 
 typedef enum _allowed_distribution
 {
@@ -66,7 +68,8 @@ int encode(unsigned int *x, int k, int n,  allowed_distribution distr, stailhead
         d = expd(k);
         break;
       default:
-        printf("Invalid distribution index set: %d\n", distr);
+        if(verbose)
+          printf("Invalid distribution index set: %d\n", distr);
         return 0;
     }
     p = create_enc_packet(d); // il pacchetto codificato (vuoto)
@@ -88,7 +91,8 @@ int encode(unsigned int *x, int k, int n,  allowed_distribution distr, stailhead
         // Controllo per evitare loop infiniti
         if(start_index == index)
         {
-          printf("Error! infinite loop detected!\n");
+          if(verbose)
+            printf("Error! infinite loop detected!\n");
           return 0;
         }
       }
@@ -177,7 +181,8 @@ int decode(stailhead encoded_packets, unsigned int *out_x)
     // Se non esiste un pacchetto di grado 1 termina
     if (p == NULL)
     {
-      printf("Decode failed: no more packets with degree 1 were found.\n");
+      if(verbose)
+        printf("Decode failed: no more packets with degree 1 were found.\n");
       return 0;
     }
     
@@ -219,6 +224,7 @@ int decode(stailhead encoded_packets, unsigned int *out_x)
 // Stampa il corretto utilizzo
 void print_usage()
 {
+  printf("rc - Esegue la codifica di k pacchetti presi da una sorgente e la successiva decodifica e informa riguardo al successo o insuccesso dell'operazione.\n");
   printf("Usage: ./rc [options]\n");
   printf("Options:\n");
   printf("  %-20s%s\n", "-h", "Prints this message.");
@@ -243,8 +249,9 @@ int main(int argc, char **argv)
   int o;
   int i;
   int n = 0;
+  verbose = 0;
 
-  while ((o = getopt (argc, argv, "k:d:hn:")) != -1)
+  while ((o = getopt (argc, argv, "k:d:hn:v")) != -1)
   {
     int found = 0;
     switch (o)
@@ -256,12 +263,15 @@ int main(int argc, char **argv)
         k = atoi(optarg);
         break;
       case 'n':
-        k = atoi(optarg);
+        n = atoi(optarg);
+        break;
+      case 'v':
+        verbose = 1;
         break;
       case 'd':
-        for (i = 0; i < allowed_distributions_count && !found; i++);
+        for (i = 0; i < allowed_distributions_count && !found; i++)
         {
-          if (optarg == allowed_distributions_name[i])
+          if (!strcmp(optarg,allowed_distributions_name[i]))
           {
             dist = i;
             found = 1;
@@ -293,10 +303,13 @@ int main(int argc, char **argv)
     n = k*2;
   }
 
-  printf("Rateless encoding and decoding of a random source.\n");
-  printf("k:\t%d\n", k);
-  printf("n:\t%d\n", n);
-  printf("distr:\t%s\n", allowed_distributions_desc[dist]);
+  if(verbose)
+  {
+    printf("Rateless encoding and decoding of a random source.\n");
+    printf("k:\t%d\n", k);
+    printf("n:\t%d\n", n);
+    printf("distr:\t%s\n", allowed_distributions_desc[dist]);
+  }
 
   srand(clock(NULL));
 
@@ -313,15 +326,18 @@ int main(int argc, char **argv)
   for (i = 0; i < k; ++i)
     source[i] = (unsigned)next_int(0, RAND_MAX);
 
-  printf("\nEncoding...\n");
+  if(verbose)
+    printf("\nEncoding...\n");
   // Codifica
   int encoded = encode(source, k, n, dist, encoded_packets);
   if(!encoded)
     return 1;
   else
-    printf("Success!\n");
+    if (verbose)
+      printf("Success!\n");
 
-  printf("\nDecoding...\n");
+  if (verbose)
+    printf("\nDecoding...\n");
   // Decodifica
   unsigned int dest[k];
   int decoded = decode(encoded_packets, dest);
@@ -329,8 +345,11 @@ int main(int argc, char **argv)
   // Se la decodifica è andata a buon fine, controlla la validità.
   if(decoded)
   {
-    printf("Success!\n");
-    printf("\nComparison between source and destination...\n");
+    if (verbose)
+    {
+      printf("Success!\n");
+      printf("\nComparison between source and destination...\n");
+    }
     int failed = 0;
     for (i = 0; i < k && !failed; ++i)
     {
@@ -338,13 +357,21 @@ int main(int argc, char **argv)
         failed = 1;
     }
     if(failed)
-      printf("Error! Source packets and decoded packets are different.\n");
+    {
+      if (verbose)
+        printf("Error! Source packets and decoded packets are different.\n");
+      return;
+    }
     else
       printf("Success!\n");
   }
   else
   {
-    printf("Error! The decoder has failed to decode.\n");
+    if(verbose)
+      printf("Error! The decoder has failed to decode.\n");
+    else
+      printf("Fail!\n");
+    return 1;
   }
 
   return 0;
