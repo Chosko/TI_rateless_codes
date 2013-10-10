@@ -101,3 +101,8 @@ int rsd()
   return d;
 }
 
+//Ritorna un intero random preso da una distribuzione esponenziale
+int expd(int max)
+{
+  return (int)(log(1-next_double())/(-0.1)) % (max) + 1;
+}

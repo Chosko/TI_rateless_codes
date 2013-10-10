@@ -13,3 +13,6 @@ double next_double();
 
 //Ritorna un int random tra min e max
 int next_int(int min, int max);
+
+//Ritorna un intero random preso da una distribuzione esponenziale
+int expd(int max);

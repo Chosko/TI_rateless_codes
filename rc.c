@@ -4,58 +4,6 @@
 #include <limits.h>
 #include "distribution.h"
 
-
-// STAILQ_HEAD(stailhead, entry) head =
-//    STAILQ_HEAD_INITIALIZER(head);
-// struct stailhead *headp;                /* Singly-linked tail queue head. */
-// struct entry {
-//        ...
-//        STAILQ_ENTRY(entry) entries;    /* Tail queue. */
-//        ...
-// } *n1, *n2, *n3, *np;
-
-// STAILQ_INIT(&head);                     /* Initialize the queue. */
-
-// n1 = malloc(sizeof(struct entry));      /* Insert at the head. */
-// STAILQ_INSERT_HEAD(&head, n1, entries);
-
-// n1 = malloc(sizeof(struct entry));      /* Insert at the tail. */
-// STAILQ_INSERT_TAIL(&head, n1, entries);
-
-// n2 = malloc(sizeof(struct entry));      /* Insert after. */
-// STAILQ_INSERT_AFTER(&head, n1, n2, entries);
-//                                        /* Deletion. */
-// STAILQ_REMOVE(&head, n2, entry, entries);
-// free(n2);
-//                                        /* Deletion from the head. */
-// n3 = STAILQ_FIRST(&head);
-// STAILQ_REMOVE_HEAD(&head, entries);
-// free(n3);
-//                                        /* Forward traversal. */
-// STAILQ_FOREACH(np, &head, entries)
-//        np-> ...
-//                                        /* Safe forward traversal. */
-// STAILQ_FOREACH_SAFE(np, &head, entries, np_temp) {
-//        np->do_stuff();
-//        ...
-//        STAILQ_REMOVE(&head, np, entry, entries);
-//        free(np);
-// }
-//                                        /* TailQ Deletion. */
-// while (!STAILQ_EMPTY(&head)) {
-//        n1 = STAILQ_FIRST(&head);
-//        STAILQ_REMOVE_HEAD(&head, entries);
-//        free(n1);
-// }
-//                                        /* Faster TailQ Deletion. */
-// n1 = STAILQ_FIRST(&head);
-// while (n1 != NULL) {
-//        n2 = STAILQ_NEXT(n1, entries);
-//        free(n1);
-//        n1 = n2;
-// }
-// STAILQ_INIT(&head);
-
 STAILQ_HEAD(_stailhead, entry);
 typedef struct _stailhead *stailhead;
 
@@ -84,7 +32,7 @@ void destroy_enc_packet(enc_packet p)
 }
 
 // Funzione di codifica.
-stailhead encode(unsigned int *x, int k, stailhead encoded_packets)
+void encode(unsigned int *x, int k, stailhead out_encoded_packets)
 {
   // Inizializza le variabili utili per la codifica
   initialize_rsd(0.05, 0.05, k); // Inizializza il generatore random rsd
@@ -129,10 +77,11 @@ stailhead encode(unsigned int *x, int k, stailhead encoded_packets)
 
     // Completa il pacchetto e lo inserisce in fondo alla lista
     p->enc = enc;
-    STAILQ_INSERT_TAIL(encoded_packets, p, entries);
+    STAILQ_INSERT_TAIL(out_encoded_packets, p, entries);
   }
 }
 
+// Controlla se l'indice è già stato selezionato
 int index_taken(int index, int * taken_indices, int count)
 {
   int i;
@@ -142,8 +91,111 @@ int index_taken(int index, int * taken_indices, int count)
   return 0;
 }
 
+// Trova un pacchetto di grado 1
+enc_packet find_grade1(stailhead packets)
+{
+  enc_packet p;
+  enc_packet found = NULL;
+  STAILQ_FOREACH(p, packets, entries)
+  {
+    if(p->indices_count == 1)
+    {
+      found = p;
+      break;
+    }
+  }
+  return found;
+}
+
+// Trova e rimuove un indice dall'array di indici di un dato pacchetto
+int find_remove_index(enc_packet p, int index)
+{
+  // Cerca l'indice
+  int i;
+  for (i = 0; i < p->indices_count; ++i)
+  {
+    if(p->indices[i] == index)
+      break;
+  }
+
+  // Se l'ha trovato
+  if (i < p->indices_count)
+  {
+    // Trasla tutto l'array
+    int j;
+    for (j = i; j < p->indices_count; ++j)
+    {
+      if(j < p->indices_count - 1)
+      {
+        p->indices[j] = p->indices[j+1];
+      }
+    }
+
+    // Riduce di 1 il numero di indici presenti nel pacchetto
+    p->indices_count--;
+    return 1;
+  }
+  else
+    return 0;
+}
+
+// Funzione di decodifica
+int decode(stailhead encoded_packets, unsigned int *out_x)
+{
+  enc_packet p;
+  while(1)
+  {
+    // Trova un pacchetto di grado 1
+    p = find_grade1(encoded_packets);
+
+    // Se non esiste un pacchetto di grado 1 termina
+    if (p == NULL)
+    {
+      printf("Decode failed: no more packets with grade 1 were found.\n");
+      return 0;
+    }
+    
+    // Decodifica il pacchetto e lo elimina dalla lista
+    out_x[p->indices[0]] = p->enc;
+    STAILQ_REMOVE(encoded_packets, p, entry, entries);
+
+    // Per ogni pacchetto che contiene l'indice p->indices[0], esegue lo xor con p->enc e rimuove l'indice
+    enc_packet iterator;
+    STAILQ_FOREACH(iterator, encoded_packets, entries)
+    {
+      if(find_remove_index(iterator, p->indices[0]))
+      {
+        iterator->enc = iterator->enc ^ p->enc;
+      }
+    }
+
+    // Libera la memoria occupata dal pacchetto
+    destroy_enc_packet(p);
+
+    // Elimina i pacchetti che sono rimasti con grado 0
+    enc_packet p_temp;
+    STAILQ_FOREACH_SAFE(iterator, encoded_packets, entries, p_temp)
+    {
+      if(iterator->indices_count < 1)
+      {
+        STAILQ_REMOVE(encoded_packets, iterator, entry, entries);
+        destroy_enc_packet(iterator);
+      }
+    }
+
+    // Termina se non ci sono più pacchetti da codificare
+    if(STAILQ_EMPTY(encoded_packets))
+      break;
+  }
+  return 1;
+}
+
+// Entry point
 int main(int argc, char const *argv[])
 {
+  // TODO: da mettere come opzione argv
+  int k = 70;
+
   srand(clock(NULL));
 
   // Crea la lista che conterrà i pacchetti codificati
@@ -153,24 +205,44 @@ int main(int argc, char const *argv[])
   STAILQ_INIT(encoded_packets);
 
   // Inizializza la sorgente
-  unsigned int source[700];
+  unsigned int source[k];
   int i;
-  for (i = 0; i < 700; ++i)
-  {
-    //Crea la sorgente random
+
+  // Crea la sorgente random
+  for (i = 0; i < k; ++i)
     source[i] = (unsigned)next_int(0, RAND_MAX);
-  }
 
   // Codifica
-  encode(source, 700, encoded_packets);
+  encode(source, k, encoded_packets);
 
-  // Itera per stampare ogni packet
-  enc_packet iterator;
-  i=0;
-  STAILQ_FOREACH(iterator, encoded_packets, entries)
+  // // Itera per stampare ogni packet
+  // enc_packet iterator;
+  // STAILQ_FOREACH(iterator, encoded_packets, entries)
+  // {
+  //   printf("packet - enc: %d - indices: %d\n", iterator->enc, iterator->indices_count);
+  //   for (i = 0; i < iterator->indices_count; ++i)
+  //   {
+  //     printf("%d\n", iterator->indices[i]);
+  //   }
+  // }
+
+  unsigned int dest[k];
+  int decoded = decode(encoded_packets, dest);
+
+  if(decoded)
   {
-    printf("packet %d - enc: %d\n", i, iterator->enc);
-    i++;
+    printf("Comparison between source and destination...\n");
+    int failed = 0;
+    for (i = 0; i < k && !failed; ++i)
+    {
+      if(source[i] != dest[i])
+        failed = 1;
+    }
+    if(failed)
+      printf("OH NOES.... EPIC FAIL\n");
+    else
+      printf("OMG IMPOSSIBRU IT WORKS YAYE!\n");
   }
+
   return 0;
 }
