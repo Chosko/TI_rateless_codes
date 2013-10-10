@@ -59,11 +59,6 @@ double mu(int i)
   return (rho(i)+tau(i))/_beta;
 }
 
-int blocksNeeded()
-{
-  return (int)(_k * _beta);
-}
-
 // Inizializza i parametri per la distribuzione rsd
 void initialize_rsd(double c, double delta, int k)
 {

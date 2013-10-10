@@ -2,7 +2,19 @@
 #include <stdlib.h>
 #include <sys/queue.h>
 #include <limits.h>
+#include <unistd.h>
 #include "distribution.h"
+
+const char *allowed_distributions_name[] = {"rsd", "uniform", "invexp"};
+const char *allowed_distributions_desc[] = {"Robust Soliton Distribution"," Uniform Distribution", "Inverse Exponential Distribution"};
+const int allowed_distributions_count = 3;
+
+typedef enum _allowed_distribution
+{
+  RSD = 0,
+  UNIFORM = 1,
+  INVEXP = 2
+} allowed_distribution;
 
 STAILQ_HEAD(_stailhead, entry);
 typedef struct _stailhead *stailhead;
@@ -32,18 +44,31 @@ void destroy_enc_packet(enc_packet p)
 }
 
 // Funzione di codifica.
-void encode(unsigned int *x, int k, stailhead out_encoded_packets)
+int encode(unsigned int *x, int k, int n,  allowed_distribution distr, stailhead out_encoded_packets)
 {
   // Inizializza le variabili utili per la codifica
   initialize_rsd(0.05, 0.05, k); // Inizializza il generatore random rsd
-  int n,i,j,d;
-  n = blocksNeeded();
+  int i,j,d;
   enc_packet p;
 
   // Ciclo principale, lo esegue n volte
   for (i = 0; i < n; ++i)
-  { 
-    d = rsd();  // il grado
+  {
+    switch(distr)
+    {
+      case RSD:
+        d = rsd();  // il grado
+        break;
+      case UNIFORM:
+        d = next_int(1, k);  // il grado
+        break;
+      case INVEXP:
+        d = expd(k);
+        break;
+      default:
+        printf("Invalid distribution index set: %d\n", distr);
+        return 0;
+    }
     p = create_enc_packet(d); // il pacchetto codificato (vuoto)
     int taken_count = 0;  // il numero degli indici già pescati
     unsigned int enc = 0;
@@ -63,8 +88,8 @@ void encode(unsigned int *x, int k, stailhead out_encoded_packets)
         // Controllo per evitare loop infiniti
         if(start_index == index)
         {
-          printf("Warning! infinite loop detected!\n");
-          break;
+          printf("Error! infinite loop detected!\n");
+          return 0;
         }
       }
 
@@ -79,6 +104,7 @@ void encode(unsigned int *x, int k, stailhead out_encoded_packets)
     p->enc = enc;
     STAILQ_INSERT_TAIL(out_encoded_packets, p, entries);
   }
+  return 1;
 }
 
 // Controlla se l'indice è già stato selezionato
@@ -92,7 +118,7 @@ int index_taken(int index, int * taken_indices, int count)
 }
 
 // Trova un pacchetto di grado 1
-enc_packet find_grade1(stailhead packets)
+enc_packet find_degree1(stailhead packets)
 {
   enc_packet p;
   enc_packet found = NULL;
@@ -146,12 +172,12 @@ int decode(stailhead encoded_packets, unsigned int *out_x)
   while(1)
   {
     // Trova un pacchetto di grado 1
-    p = find_grade1(encoded_packets);
+    p = find_degree1(encoded_packets);
 
     // Se non esiste un pacchetto di grado 1 termina
     if (p == NULL)
     {
-      printf("Decode failed: no more packets with grade 1 were found.\n");
+      printf("Decode failed: no more packets with degree 1 were found.\n");
       return 0;
     }
     
@@ -190,11 +216,87 @@ int decode(stailhead encoded_packets, unsigned int *out_x)
   return 1;
 }
 
+// Stampa il corretto utilizzo
+void print_usage()
+{
+  printf("Usage: ./rc [options]\n");
+  printf("Options:\n");
+  printf("  %-20s%s\n", "-h", "Prints this message.");
+  printf("\n");
+  printf("  %-20s%s\n", "-k <value>", "Sets to <value> the number of packets emitted by the source. Default is 70");
+  printf("  %-20s%s\n", "-n <value>", "Encodes the k packets of the source into <value> encoded packets. Default is k * 2");
+  printf("  %-20s%s\n", "","min value is 2, maximum is 100000");
+  printf("\n");
+  printf("  %-20s%s\n", "-d <ditsr>", "Use the distribution <distr> for encoding.");
+  printf("  %-20s%s\n", "", "Allowed <distr> are:");
+  printf("  %-20s-  %-10s%s\n", "", "rsd", "Robust Soliton Distribution");
+  printf("  %-20s-  %-10s%s\n", "", "uniform", "Uniform Distribution");
+  printf("  %-20s-  %-10s%s\n", "", "invexp", "Inverse Exponential Distribution");
+}
+
 // Entry point
-int main(int argc, char const *argv[])
+int main(int argc, char **argv)
 {
   // TODO: da mettere come opzione argv
   int k = 70;
+  allowed_distribution dist = RSD;
+  int o;
+  int i;
+  int n = 0;
+
+  while ((o = getopt (argc, argv, "k:d:hn:")) != -1)
+  {
+    int found = 0;
+    switch (o)
+    {
+      case 'h':
+        print_usage();
+        return 0;
+      case 'k':
+        k = atoi(optarg);
+        break;
+      case 'n':
+        k = atoi(optarg);
+        break;
+      case 'd':
+        for (i = 0; i < allowed_distributions_count && !found; i++);
+        {
+          if (optarg == allowed_distributions_name[i])
+          {
+            dist = i;
+            found = 1;
+          }
+        }
+        if(!found)
+        {
+          printf("%s is not a valid value for option -d.\n", optarg);
+          print_usage();
+          return 1;
+        }
+        break;
+      case '?':
+        if (optopt == 'k')
+          fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+        else if (isprint (optopt))
+          fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+        else
+          fprintf (stderr, "Unknown option character `\\x%x'.\n", optopt);
+        print_usage();
+        return 1;
+      default:
+        print_usage();
+        return 1;
+    }
+  }
+  if (!n)
+  {
+    n = k*2;
+  }
+
+  printf("Rateless encoding and decoding of a random source.\n");
+  printf("k:\t%d\n", k);
+  printf("n:\t%d\n", n);
+  printf("distr:\t%s\n", allowed_distributions_desc[dist]);
 
   srand(clock(NULL));
 
@@ -206,32 +308,29 @@ int main(int argc, char const *argv[])
 
   // Inizializza la sorgente
   unsigned int source[k];
-  int i;
 
   // Crea la sorgente random
   for (i = 0; i < k; ++i)
     source[i] = (unsigned)next_int(0, RAND_MAX);
 
+  printf("\nEncoding...\n");
   // Codifica
-  encode(source, k, encoded_packets);
+  int encoded = encode(source, k, n, dist, encoded_packets);
+  if(!encoded)
+    return 1;
+  else
+    printf("Success!\n");
 
-  // // Itera per stampare ogni packet
-  // enc_packet iterator;
-  // STAILQ_FOREACH(iterator, encoded_packets, entries)
-  // {
-  //   printf("packet - enc: %d - indices: %d\n", iterator->enc, iterator->indices_count);
-  //   for (i = 0; i < iterator->indices_count; ++i)
-  //   {
-  //     printf("%d\n", iterator->indices[i]);
-  //   }
-  // }
-
+  printf("\nDecoding...\n");
+  // Decodifica
   unsigned int dest[k];
   int decoded = decode(encoded_packets, dest);
 
+  // Se la decodifica è andata a buon fine, controlla la validità.
   if(decoded)
   {
-    printf("Comparison between source and destination...\n");
+    printf("Success!\n");
+    printf("\nComparison between source and destination...\n");
     int failed = 0;
     for (i = 0; i < k && !failed; ++i)
     {
@@ -239,9 +338,13 @@ int main(int argc, char const *argv[])
         failed = 1;
     }
     if(failed)
-      printf("OH NOES.... EPIC FAIL\n");
+      printf("Error! Source packets and decoded packets are different.\n");
     else
-      printf("OMG IMPOSSIBRU IT WORKS YAYE!\n");
+      printf("Success!\n");
+  }
+  else
+  {
+    printf("Error! The decoder has failed to decode.\n");
   }
 
   return 0;
